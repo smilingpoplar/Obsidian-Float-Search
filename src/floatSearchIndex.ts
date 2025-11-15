@@ -223,7 +223,8 @@ export default class FloatSearchPlugin extends Plugin {
 	initModal(
 		state: searchState,
 		stateSave: boolean = false,
-		clearQuery: boolean = false
+		clearQuery: boolean = false,
+		fromURI: boolean = false
 	) {
 		if (this.modal) {
 			this.modal.close();
@@ -244,6 +245,13 @@ export default class FloatSearchPlugin extends Plugin {
 			{ ...state, query: clearQuery ? "" : state.query }
 		);
 		this.modal.open();
+
+		// 如果是通过URI协议打开且有查询内容，删除"建议容器"
+		if (fromURI && state.query) {
+			setTimeout(() => {
+				document.querySelector('.suggestion-container')?.remove();
+			}, 10);
+		}
 	}
 
 	patchWorkspace() {
@@ -855,7 +863,8 @@ export default class FloatSearchPlugin extends Plugin {
 							current: false,
 						},
 						true,
-						false
+						false,
+						true
 					);
 				} else {
 					await initSearchViewWithLeaf(
