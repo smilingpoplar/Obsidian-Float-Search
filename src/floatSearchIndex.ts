@@ -27,6 +27,7 @@ import {
 import { EmbeddedView, isEmebeddedLeaf, spawnLeafView } from "./leafView";
 import { around } from "monkey-around";
 import { debounce } from "obsidian";
+import { EditorView } from "@codemirror/view";
 
 type sortOrder =
 	| "alphabetical"
@@ -73,6 +74,40 @@ const DEFAULT_SETTINGS: FloatSearchSettings = {
 	showInstructions: true,
 	defaultViewType: "modal",
 };
+
+/**
+ * Scroll matched text to the top of the main editor
+ * @param app - Obsidian app instance
+ * @param matchOffset - Character offset of the match
+ */
+function scrollMatchToTop(app: App, matchOffset: number): void {
+	setTimeout(() => {
+		const leaf = app.workspace.getMostRecentLeaf();
+		if (!leaf) return;
+
+		const view = leaf.view;
+		if (!view) return;
+
+		const editor = (view as any).editor;
+		if (!editor) return;
+
+		const cm = (editor as any).cm as EditorView;
+		if (!cm) {
+			// Fallback to Obsidian built-in API (scrolls to center)
+			const pos = editor.offsetToPos(matchOffset);
+			editor.scrollIntoView({ from: pos, to: pos });
+			return;
+		}
+
+		// Use CodeMirror 6 API to scroll to top
+		cm.dispatch({
+			effects: EditorView.scrollIntoView(matchOffset, {
+				y: "start",
+				yMargin: 30,
+			}),
+		});
+	}, 150);
+}
 
 const allViews: viewType[] = [
 	{
@@ -1600,7 +1635,7 @@ class FloatSearchModal extends Modal {
 
 	initContent() {
 		const { contentEl } = this;
-		contentEl.onclick = (e) => {
+		contentEl.onclick = async (e) => {
 			const resultElement = contentEl.getElementsByClassName(
 				"search-results-children"
 			)[0];
@@ -1623,7 +1658,54 @@ class FloatSearchModal extends Modal {
 						break;
 					}
 					if (targetElement.classList.contains("tree-item")) {
+						// Get file info before closing
+						const fileInnerEl = targetElement?.getElementsByClassName(
+							"tree-item-inner"
+						)[0] as HTMLElement;
+						const innerText = fileInnerEl.innerText;
+						const file = this.plugin.app.metadataCache.getFirstLinkpathDest(
+							innerText,
+							""
+						);
+
+						// Get match info
+						const currentView = this.searchLeaf.view as SearchView;
+						const item = currentView.dom.resultDomLookup.get(file);
+
+						// Try to get match offset - find the specific clicked match
+						let matchOffset: number | undefined = undefined;
+						// Get the clicked element and find the match element
+						const clickedEl = e.target as HTMLElement;
+						// Try to get the actual match element (not file element)
+						const matchEl = clickedEl.closest(".search-result-file-match");
+						
+						if (matchEl && item?.vChildren?.children) {
+							// Get index among siblings - filter to only match elements
+							const parent = matchEl.parentElement;
+							if (parent) {
+								// Filter to only .search-result-file-match elements
+								const siblings = Array.from(parent.children).filter(
+									(el) => el.classList.contains("search-result-file-match")
+								);
+								const clickedIdx = siblings.indexOf(matchEl);
+								if (clickedIdx >= 0 && clickedIdx < item.vChildren.children.length) {
+									const child = item.vChildren.children[clickedIdx];
+									const childMatch = child?.matches?.[0];
+									if (Array.isArray(childMatch)) {
+										matchOffset = childMatch[0];
+									} else if (typeof childMatch === "number") {
+										matchOffset = childMatch;
+									}
+								}
+							}
+						}
+
 						this.close();
+
+						// Scroll to top if we have a match offset
+						if (matchOffset !== undefined) {
+							scrollMatchToTop(this.plugin.app, matchOffset);
+						}
 						break;
 					}
 					targetElement = targetElement.parentElement;
